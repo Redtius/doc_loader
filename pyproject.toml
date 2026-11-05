@@ -1,0 +1,27 @@
+[project]
+name = "doc-loader"
+version = "1.2.0"
+description = "Word and PDF documents to Markdown LangChain Documents, with heading detection and a quality report"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain-core>=0.3",
+    "pypdf>=5",
+    "python-docx>=1.1",
+]
+
+[project.optional-dependencies]
+pymupdf = ["pymupdf>=1.24"]  # AGPL-3.0 or commercial licence
+test = ["pytest>=8"]
+fixtures = ["reportlab>=4"]
+tools = ["sentence-transformers", "rank-bm25", "langchain-text-splitters", "docling"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["doc_loader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
