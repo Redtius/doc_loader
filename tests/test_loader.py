@@ -62,6 +62,13 @@ def test_running_header_and_footer_are_removed(engine):
     assert "Page 1/3" not in content
 
 
+def test_paragraphs_in_a_larger_font_are_not_headings(engine):
+    document = load("large_paragraphs.pdf", engine)
+    assert headings("large_paragraphs.pdf", engine) == ["# Guide de l'epargne", "## Livret", "## Compte a terme"]
+    assert "Ce guide presente les solutions d'epargne\nproposees aux clients particuliers." in document.page_content
+    assert "Le taux du livret est fixe chaque annee" in document.page_content
+
+
 def test_margins_are_measured_on_the_visible_page(engine):
     content = load("cropped.pdf", engine).page_content
     assert "Internal document" not in content

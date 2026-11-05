@@ -61,7 +61,7 @@ def pdf_blocks(lines: list[Line], bookmarks: list[tuple[str, int, int]], page_co
     toc = _toc_lines(lines, page_count)
     matched = _match_bookmarks(lines, bookmarks)
     candidate = [
-        i in matched or (i not in toc and _looks_like_heading(line, body_size))
+        i in matched or (i not in toc and _prominent(line, body_size))
         for i, line in enumerate(lines)
     ]
     if len(matched) >= MIN_BOOKMARK_MATCHES:
@@ -79,7 +79,7 @@ def pdf_blocks(lines: list[Line], bookmarks: list[tuple[str, int, int]], page_co
             for i, (line, is_candidate) in enumerate(zip(lines, candidate))
         ]
 
-    groups = _group(lines, candidate, matched)
+    groups = _group(lines, candidate, matched, body_size)
     headings = [g for g in groups if g.heading]
     _rank(headings)
     return [
@@ -101,34 +101,53 @@ def _is_heading_text(text: str) -> bool:
     return 0 < len(text) <= MAX_HEADING_CHARS and text[-1] not in SENTENCE_ENDINGS
 
 
-def _looks_like_heading(line: Line, body_size: float) -> bool:
-    if not line.upright or not _is_heading_text(line.text) or not any(c.isalpha() for c in line.text):
+def _is_larger(line: Line, body_size: float) -> bool:
+    return line.size >= body_size * HEADING_SIZE_RATIO
+
+
+def _prominent(line: Line, body_size: float) -> bool:
+    """Set apart from the body text: larger, or bold at body size. Only a heading if its
+    whole block is also short (see ``_group``)."""
+    if not line.upright or not any(c.isalpha() for c in line.text):
         return False
-    if line.size >= body_size * HEADING_SIZE_RATIO:
-        return True
-    return line.bold and line.size >= body_size * (1 - SIZE_TOLERANCE) and len(line.text) <= MAX_BOLD_HEADING_CHARS
+    return _is_larger(line, body_size) or (line.bold and line.size >= body_size * (1 - SIZE_TOLERANCE))
 
 
-def _group(lines: list[Line], candidate: list[bool], matched: dict[int, int]) -> list[_Group]:
-    """Join wrapped headings, and consecutive body lines into paragraphs."""
-    groups: list[_Group] = []
+def _group(lines: list[Line], candidate: list[bool], matched: dict[int, int], body_size: float) -> list[_Group]:
+    """Group lines into visual blocks, then decide which blocks are headings.
+
+    A block is a run of lines on one page, in one style, at normal line spacing -- a
+    wrapped heading or a paragraph. It is decided as a whole: a prominent block is a
+    heading only if all of its text is short and doesn't end like a sentence, so a
+    paragraph set in a larger font stays a paragraph however short its first line is.
+    Bookmarked lines are headings on their own. Consecutive body blocks are joined.
+    """
+    blocks: list[tuple[list[Line], bool, int | None]] = []
     for i, line in enumerate(lines):
-        if groups:
-            group = groups[-1]
-            last = group.lines[-1]
-            wrapped = (
-                group.heading and candidate[i] and i not in matched
+        if blocks:
+            block, block_candidate, depth = blocks[-1]
+            last = block[-1]
+            if (
+                depth is None and i not in matched
                 and last.page == line.page and last.same_style(line, SIZE_TOLERANCE)
                 and 0 < last.y - line.y <= WRAP_LINE_GAP * line.size
-            )
-            if wrapped or (not group.heading and not candidate[i]):
-                group.lines.append(line)
+            ):
+                block.append(line)
                 continue
-        groups.append(_Group([line], candidate[i], matched.get(i)))
-    # Lines that each looked like a heading may join into a paragraph set in a larger font.
-    for group in groups:
-        if group.heading and group.depth is None and not _is_heading_text(group.text):
-            group.heading = False
+        blocks.append(([line], candidate[i], matched.get(i)))
+
+    groups: list[_Group] = []
+    for block, block_candidate, depth in blocks:
+        text = " ".join(line.text for line in block)
+        heading = depth is not None or (
+            block_candidate
+            and _is_heading_text(text)
+            and (_is_larger(block[0], body_size) or all(len(l.text) <= MAX_BOLD_HEADING_CHARS for l in block))
+        )
+        if not heading and groups and not groups[-1].heading:
+            groups[-1].lines.extend(block)  # paragraphs follow each other in one body group
+        else:
+            groups.append(_Group(block, heading, depth))
     return groups
 
 

@@ -77,6 +77,25 @@ def cropped() -> None:
     c.save()
 
 
+def large_paragraphs() -> None:
+    """Paragraphs set in a larger font (an introduction, a bold highlight box) are not
+    headings, even though their first lines are short and don't end with a period."""
+    c = canvas.Canvas(str(OUT / "large_paragraphs.pdf"), pagesize=A4)
+    p = Page(c)
+    p.line("Guide de l'epargne", 20, bold=True, gap_after=10)
+    p.line("Ce guide presente les solutions d'epargne", 14)
+    p.line("proposees aux clients particuliers.", 14, gap_after=10)
+    p.line("Livret", 14, bold=True, gap_after=4)
+    p.line(BODY)
+    p.line(BODY, gap_after=8)
+    p.line("Le taux du livret est fixe chaque annee", 12, bold=True)
+    p.line("et reste garanti pendant toute la duree", 12, bold=True)
+    p.line("du contrat signe par le client.", 12, bold=True, gap_after=10)
+    p.line("Compte a terme", 14, bold=True, gap_after=4)
+    p.line(BODY)
+    c.save()
+
+
 def bookmarks() -> None:
     """Every heading has the same style: only the bookmarks give the levels."""
     c = canvas.Canvas(str(OUT / "bookmarks.pdf"), pagesize=A4)
@@ -181,6 +200,6 @@ def word() -> None:
 
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for make in [numbered, cropped, bookmarks, tariffs, toc, rotated, no_spaces, scanned, word]:
+    for make in [numbered, cropped, large_paragraphs, bookmarks, tariffs, toc, rotated, no_spaces, scanned, word]:
         make()
     print("fixtures written to", OUT)
