@@ -54,7 +54,10 @@ class PdfParser(BaseBlobParser):
         blocks = pdf_blocks(lines, content.bookmarks, content.page_count)
         title = pick_title(blocks, first_page_only=True) or _title_from(name)
         markdown = render_markdown(blocks, title)
-        quality = assess(markdown, page_count=pages_read, empty_pages=empty_pages)
+        unpositioned_pages = sum(1 for page in content.pages if page and not page[0].positioned)
+        quality = assess(
+            markdown, page_count=pages_read, empty_pages=empty_pages, unpositioned_pages=unpositioned_pages,
+        )
         yield _document(
             blob, markdown, title, quality,
             format="pdf", page_count=content.page_count, pdf_engine=self.engine,

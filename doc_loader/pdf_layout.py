@@ -29,6 +29,15 @@ STYLE_RATIO = 0.6
 RUNNING_MARGIN = 0.1
 # ...on at least half of the pages (and 3 of them).
 RUNNING_MIN_PAGES = 3
+# A line's height above and below its baseline, in font sizes (typical ascent / descent).
+ASCENT = 0.8
+DESCENT = 0.2
+# Reading order: an empty vertical band at least this wide (in font sizes) separates columns.
+COLUMN_GAP = 1.0
+# If more than this share of a page's lines sit outside the visible page, the engine's
+# positions are wrong for that page (seen with pypdf on some Canva exports): its lines
+# keep drawing order and are not used for margin detection.
+MAX_OUTSIDE_RATIO = 0.2
 
 
 @dataclass
@@ -55,27 +64,94 @@ class Line:
     upright: bool
     y: float  # baseline, points from the bottom of the page
     y_ratio: float  # 0 = bottom of the page, 1 = top
+    x0: float = 0.0  # left edge
+    x1: float = 0.0  # right edge
+    positioned: bool = True  # False when the page's positions are unreliable
 
     def same_style(self, other: "Line", tolerance: float) -> bool:
         return self.bold == other.bold and abs(self.size - other.size) <= tolerance * max(self.size, other.size)
 
+    @property
+    def top(self) -> float:
+        return self.y + ASCENT * self.size
+
+    @property
+    def bottom(self) -> float:
+        return self.y - DESCENT * self.size
+
 
 def page_lines(page: PageObject, page_no: int) -> list[Line]:
-    """The page's lines, read with pypdf, in drawing order.
+    """The page's lines, read with pypdf, in reading order.
 
     Positions are measured in the crop box -- the visible page -- which can be smaller
     than the media box (print margins), so margins and heights match what readers see.
     """
     box = page.cropbox
-    bottom = float(box.bottom)
-    pieces = [replace(piece, y=piece.y - bottom) for piece in _pieces(page)]
-    return lines_from_pieces(pieces, page_no, float(box.height) or 1.0)
+    left, bottom = float(box.left), float(box.bottom)
+    pieces = [replace(piece, x=piece.x - left, y=piece.y - bottom) for piece in _pieces(page)]
+    return lines_from_pieces(pieces, page_no, float(box.height) or 1.0, float(box.width) or 1.0)
 
 
-def lines_from_pieces(pieces: list[Piece], page_no: int, page_height: float) -> list[Line]:
-    """Build lines from positioned pieces -- the same way whatever engine read them."""
-    lines = [_make_line(group, page_no, page_height) for group in _group(pieces)]
-    return [line for line in lines if line.text]
+def lines_from_pieces(pieces: list[Piece], page_no: int, page_height: float, page_width: float) -> list[Line]:
+    """Build lines from positioned pieces -- the same way whatever engine read them --
+    and put them in reading order, unless the positions are unreliable."""
+    lines = [line for line in (_make_line(group, page_no, page_height) for group in _group(pieces)) if line.text]
+    outside = sum(1 for line in lines if not _on_page(line, page_width, page_height))
+    if lines and outside > MAX_OUTSIDE_RATIO * len(lines):
+        return [replace(line, positioned=False) for line in lines]  # drawing order
+    return reading_order(lines)
+
+
+def _on_page(line: Line, page_width: float, page_height: float) -> bool:
+    margin = line.size  # allow a line to touch the edge
+    return -margin <= line.y <= page_height + margin and -margin <= line.x0 <= page_width + margin
+
+
+def reading_order(lines: list[Line]) -> list[Line]:
+    """A page's lines in reading order, by recursive XY-cut.
+
+    PDFs draw text in any order (a title added last, text boxes, columns), so drawing
+    order is not reading order. The page is cut at its widest empty band -- horizontal
+    (between rows: top part first) or vertical (between columns: left part first) -- and
+    each part is cut again until single lines remain. A full-width title is cut off above
+    the columns, and each column is read top to bottom. Rotated lines keep drawing order,
+    after the rest.
+    """
+    upright = [line for line in lines if line.upright]
+    if not upright:
+        return lines
+    sizes = sorted(line.size for line in upright)
+    min_column_gap = COLUMN_GAP * sizes[len(sizes) // 2]
+    return _xy_cut(upright, min_column_gap) + [line for line in lines if not line.upright]
+
+
+def _xy_cut(lines: list[Line], min_column_gap: float) -> list[Line]:
+    if len(lines) <= 1:
+        return lines
+    row_gap, row_cut = _widest_gap([(line.bottom, line.top) for line in lines], 0.0)
+    column_gap, column_cut = _widest_gap([(line.x0, line.x1) for line in lines], min_column_gap)
+    if row_cut is None and column_cut is None:
+        return sorted(lines, key=lambda line: (-line.y, line.x0))
+    if column_cut is not None and (row_cut is None or column_gap > row_gap):
+        in_first = [line.x1 <= column_cut for line in lines]  # left of the cut
+    else:
+        in_first = [line.bottom >= row_cut for line in lines]  # above the cut
+    first = [line for line, keep in zip(lines, in_first) if keep]
+    rest = [line for line, keep in zip(lines, in_first) if not keep]
+    return _xy_cut(first, min_column_gap) + _xy_cut(rest, min_column_gap)
+
+
+def _widest_gap(intervals: list[tuple[float, float]], min_gap: float) -> tuple[float, float | None]:
+    """The widest empty space between intervals ``(start, end)``, and a position inside it."""
+    best_gap, best_cut = 0.0, None
+    ordered = sorted(intervals)
+    reach = ordered[0][1]
+    for start, end in ordered[1:]:
+        gap = start - reach
+        if gap > min_gap and gap > best_gap:
+            best_gap, best_cut = gap, reach + gap / 2
+        reach = max(reach, end)
+    return best_gap, best_cut
 
 
 def drop_running_lines(lines: list[Line], page_count: int) -> list[Line]:
@@ -84,6 +160,8 @@ def drop_running_lines(lines: list[Line], page_count: int) -> list[Line]:
         return lines
 
     def key(line: Line) -> str | None:
+        if not line.positioned:
+            return None
         in_margin = line.y_ratio > 1 - RUNNING_MARGIN or line.y_ratio < RUNNING_MARGIN
         return re.sub(r"\d+", "#", line.text.lower()) if in_margin else None  # "Page 3" ~ "Page 4"
 
@@ -168,6 +246,8 @@ def _make_line(pieces: list[Piece], page_no: int, page_height: float) -> Line:
         upright=all(p.upright for p in inked),
         y=inked[0].y,
         page_height=page_height,
+        x0=min(p.x for p in inked),
+        x1=max(p.x + p.width for p in inked),
     )
 
 
@@ -179,6 +259,8 @@ def styled_line(
     upright: bool,
     y: float,
     page_height: float,
+    x0: float = 0.0,
+    x1: float = 0.0,
 ) -> Line:
     """A line whose size, bold and italic come from a character vote over its parts
     ``(text, size, bold, italic)``: a line may mix a regular "1.1 " and a bold title."""
@@ -199,6 +281,8 @@ def styled_line(
         upright=upright,
         y=y,
         y_ratio=y / page_height,
+        x0=x0,
+        x1=x1,
     )
 
 

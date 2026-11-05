@@ -145,4 +145,4 @@ def _mupdf_page_lines(page: object, page_no: int) -> list[Line]:
                     italic=italic,
                     upright=abs(dy) <= ROTATION_TOLERANCE * abs(dx),
                 ))
-    return lines_from_pieces(pieces, page_no, height)
+    return lines_from_pieces(pieces, page_no, height, page.rect.width or 1.0)

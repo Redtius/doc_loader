@@ -96,6 +96,36 @@ def large_paragraphs() -> None:
     c.save()
 
 
+def reading_order() -> None:
+    """Drawing order is not reading order.
+
+    Page 1: a section heading is drawn after its sub-section and text, above them.
+    Page 2: a full-width title above two columns whose lines sit on the same baselines;
+    the right column is drawn first.
+    """
+    c = canvas.Canvas(str(OUT / "reading_order.pdf"), pagesize=A4)
+    top = HEIGHT - 80
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(60, top, "Guide des cartes")
+    c.setFont("Helvetica", 10)
+    c.drawString(60, top - 60, BODY)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(60, top - 90, "Plafonds")
+    c.setFont("Helvetica", 10)
+    c.drawString(60, top - 108, BODY)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(60, top - 40, "Cartes")  # drawn last, read before "Plafonds"
+    c.showPage()
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(60, top, "Deux colonnes")
+    for column, x in [("droite", 320), ("gauche", 60)]:  # right column drawn first
+        for row in range(4):
+            c.setFont("Helvetica", 10)
+            c.drawString(x, top - 30 - row * 13, f"Colonne {column} ligne {row + 1}")
+    c.save()
+
+
 def bookmarks() -> None:
     """Every heading has the same style: only the bookmarks give the levels."""
     c = canvas.Canvas(str(OUT / "bookmarks.pdf"), pagesize=A4)
@@ -200,6 +230,6 @@ def word() -> None:
 
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
-    for make in [numbered, cropped, large_paragraphs, bookmarks, tariffs, toc, rotated, no_spaces, scanned, word]:
+    for make in [numbered, cropped, large_paragraphs, reading_order, bookmarks, tariffs, toc, rotated, no_spaces, scanned, word]:
         make()
     print("fixtures written to", OUT)

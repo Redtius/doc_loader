@@ -42,7 +42,9 @@ class Quality:
             self.status = status
 
 
-def assess(markdown: str, *, page_count: int | None = None, empty_pages: int = 0) -> Quality:
+def assess(
+    markdown: str, *, page_count: int | None = None, empty_pages: int = 0, unpositioned_pages: int = 0,
+) -> Quality:
     quality = Quality()
     lines = markdown.splitlines()
     heading_lines = [l for l in lines if re.match(r"#{1,6} ", l)]
@@ -70,6 +72,12 @@ def assess(markdown: str, *, page_count: int | None = None, empty_pages: int = 0
             quality._flag("warning", f"{empty_pages} page(s) without text skipped")
         if headings == 0 and page_count >= MIN_PAGES_FOR_HEADINGS:
             quality._flag("warning", "no headings found")
+        if unpositioned_pages:
+            quality._flag(
+                "warning",
+                f"text positions outside the page on {unpositioned_pages} page(s): drawing order kept "
+                "(try engine='pymupdf')",
+            )
 
     value_lines = sum(1 for l in body if len(l) <= VALUE_LINE_MAX_CHARS and l.lstrip()[:1].isdigit())
     quality.metrics["value_line_ratio"] = round(value_lines / (len(body) or 1), 2)

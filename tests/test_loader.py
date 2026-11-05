@@ -69,6 +69,15 @@ def test_paragraphs_in_a_larger_font_are_not_headings(engine):
     assert "Le taux du livret est fixe chaque annee" in document.page_content
 
 
+def test_lines_follow_reading_order_not_drawing_order(engine):
+    content = load("reading_order.pdf", engine).page_content
+    assert headings("reading_order.pdf", engine)[:3] == ["# Guide des cartes", "## Cartes", "### Plafonds"]
+    left = [content.index(f"Colonne gauche ligne {n}") for n in range(1, 5)]
+    right = [content.index(f"Colonne droite ligne {n}") for n in range(1, 5)]
+    assert left == sorted(left) and right == sorted(right)  # each column top to bottom
+    assert max(left) < min(right)  # the left column before the right one
+
+
 def test_margins_are_measured_on_the_visible_page(engine):
     content = load("cropped.pdf", engine).page_content
     assert "Internal document" not in content
@@ -219,3 +228,18 @@ def test_folder_blob_loader_yields_supported_files_only(tmp_path):
     names = [Path(blob.path).name for blob in FolderBlobLoader(tmp_path).yield_blobs()]
     assert names == ["fiche.pdf"]
     assert discover_documents(tmp_path)[0][0] == "cartes"
+
+
+def test_positions_outside_the_page_keep_drawing_order():
+    from doc_loader.pdf_layout import Piece, lines_from_pieces
+    from doc_loader.quality import assess
+
+    def piece(text, y):
+        return Piece(text=text, x=50, y=y, size=10, width=60, bold=False, italic=False, upright=True)
+
+    # An engine reporting y in another space (e.g. 2,400 on an 800-point page), upside down.
+    lines = lines_from_pieces([piece("first", 600), piece("second", 1500), piece("third", 2400)], 1, 800, 600)
+    assert [line.text for line in lines] == ["first", "second", "third"]  # not re-sorted by y
+    assert not any(line.positioned for line in lines)
+    report = assess("# t\n\ntext", page_count=1, unpositioned_pages=1)
+    assert report.status == "warning" and "drawing order kept" in "; ".join(report.reasons)
